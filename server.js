@@ -49,23 +49,180 @@ if (missingEnvVars.length === 0) {
 
 // Helper function to send email via Brevo API
 const sendEmailViaBrevoAPI = async (emailData) => {
-  const response = await fetch(BREVO_API_URL, {
-    method: 'POST',
-    headers: {
-      'accept': 'application/json',
-      'api-key': BREVO_API_KEY,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(emailData)
-  });
+  try {
+    const response = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': BREVO_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(emailData)
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(`Brevo API error: ${response.status} - ${errorData.message || response.statusText}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('❌ Brevo API Error Response:', errorData);
+      throw new Error(`Brevo API error: ${response.status} - ${errorData.message || response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Brevo API Response:', result);
+    return result;
+  } catch (error) {
+    console.error('❌ Brevo API Request Failed:', error.message);
+    throw error;
   }
-
-  return await response.json();
 };
+
+// Root endpoint - API welcome message
+app.get('/', (req, res) => {
+  // Check if request is from browser (HTML) or API client (JSON)
+  const acceptsHtml = req.headers.accept && req.headers.accept.includes('text/html');
+  
+  if (acceptsHtml) {
+    // Return HTML for browser visits
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>NexoventLabs API</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+          }
+          .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+          }
+          h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+          }
+          .status {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+          }
+          p { color: #666; line-height: 1.6; margin-bottom: 20px; }
+          .endpoints {
+            background: #f7fafc;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+          }
+          .endpoint {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+          }
+          .endpoint code {
+            color: #667eea;
+            font-weight: bold;
+          }
+          .method {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-right: 10px;
+          }
+          .method.post { background: #10b981; }
+          a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+          }
+          a:hover { text-decoration: underline; }
+          .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #999;
+            font-size: 0.9em;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🚀 NexoventLabs API</h1>
+          <span class="status">✅ Running</span>
+          
+          <p>Welcome to the NexoventLabs Backend API. This service handles contact form submissions and email notifications.</p>
+          
+          <div class="endpoints">
+            <h3 style="margin-bottom: 15px; color: #333;">📡 Available Endpoints</h3>
+            
+            <div class="endpoint">
+              <span class="method">GET</span>
+              <code>/api/health</code>
+              <p style="margin: 5px 0 0 0; font-size: 0.9em;">Check API health and email service status</p>
+            </div>
+            
+            <div class="endpoint">
+              <span class="method post">POST</span>
+              <code>/api/contact</code>
+              <p style="margin: 5px 0 0 0; font-size: 0.9em;">Submit contact form (sends email notifications)</p>
+            </div>
+            
+            <div class="endpoint">
+              <span class="method">GET</span>
+              <code>/api/test-email</code>
+              <p style="margin: 5px 0 0 0; font-size: 0.9em;">Send test email to verify email service</p>
+            </div>
+          </div>
+          
+          <p>
+            <strong>Quick Test:</strong> 
+            <a href="/api/health" target="_blank">Check Health Status</a> | 
+            <a href="/api/test-email" target="_blank">Send Test Email</a>
+          </p>
+          
+          <div class="footer">
+            <p>© ${new Date().getFullYear()} NexoventLabs. All rights reserved.</p>
+            <p style="margin-top: 5px;">Powered by Brevo API v3 | Deployed on Render</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  } else {
+    // Return JSON for API clients
+    res.json({
+      success: true,
+      message: 'NexoventLabs Backend API',
+      status: 'running',
+      version: '1.0.0',
+      endpoints: {
+        health: '/api/health',
+        contact: 'POST /api/contact',
+        testEmail: '/api/test-email'
+      },
+      documentation: 'https://github.com/nexoventlabs',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // Contact form endpoint
 app.post('/api/contact', async (req, res) => {
@@ -328,13 +485,21 @@ Andhra Pradesh, India
 
     try {
       console.log('📤 Sending emails via Brevo API...');
-      await Promise.all([
-        sendWithRetry(adminEmailData),
-        sendWithRetry(autoReplyEmailData)
-      ]);
-      console.log('✅ Emails sent successfully to:', email);
+      
+      // Send admin email first
+      console.log('📧 Sending admin notification...');
+      await sendWithRetry(adminEmailData);
+      console.log('✅ Admin email sent successfully');
+      
+      // Send auto-reply email
+      console.log('📧 Sending auto-reply to:', email);
+      await sendWithRetry(autoReplyEmailData);
+      console.log('✅ Auto-reply email sent successfully');
+      
+      console.log('✅ Both emails sent successfully!');
     } catch (emailError) {
       console.error('❌ Email sending failed after all retries:', emailError.message);
+      console.error('📋 Error details:', emailError);
       throw new Error('Failed to send email via Brevo API. Please check API key and try again.');
     }
 
