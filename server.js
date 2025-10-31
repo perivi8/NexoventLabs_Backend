@@ -39,9 +39,9 @@ const transporter = nodemailer.createTransport({
     pass: process.env.BREVO_SMTP_PASSWORD,
   },
   // Enhanced connection settings for Render deployment
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
+  connectionTimeout: 30000, // 30 seconds (Render free tier can be slow)
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
   pool: true, // Use connection pooling
   maxConnections: 5,
   maxMessages: 100,
@@ -57,15 +57,23 @@ const transporter = nodemailer.createTransport({
 });
 
 // Verify transporter configuration with better error handling
+// Make verification non-blocking to allow server to start even if SMTP is slow
 if (missingEnvVars.length === 0) {
+  console.log('🔄 Verifying email connection (this may take up to 30 seconds)...');
+  
   transporter.verify((error, success) => {
     if (error) {
-      console.error('❌ Email transporter verification failed:', error.message);
-      console.error('🔍 Check your Brevo SMTP credentials in environment variables');
+      console.error('⚠️  Email transporter verification failed:', error.message);
+      console.error('📋 Error code:', error.code);
       console.error('📋 SMTP Server:', process.env.BREVO_SMTP_SERVER);
       console.error('📋 SMTP Port:', process.env.BREVO_SMTP_PORT);
       console.error('📋 SMTP Email:', process.env.BREVO_SMTP_EMAIL ? '✓ Set' : '✗ Missing');
       console.error('📋 SMTP Password:', process.env.BREVO_SMTP_PASSWORD ? '✓ Set' : '✗ Missing');
+      console.error('');
+      console.error('⚠️  WARNING: Email verification failed, but server will continue.');
+      console.error('💡 Emails may still work when actually sending.');
+      console.error('💡 If emails fail, try using port 465 instead of 587.');
+      console.error('');
     } else {
       console.log('✅ Email server is ready to send messages');
       console.log('📧 From:', process.env.BREVO_FROM_EMAIL);
@@ -298,23 +306,44 @@ Andhra Pradesh, India
       });
     }
 
-    // Send both emails with retry logic
+    // Send both emails with retry logic (3 attempts with exponential backoff)
+    const sendWithRetry = async (mailOptions, retries = 3, delay = 2000) => {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          await transporter.sendMail(mailOptions);
+          return true;
+        } catch (error) {
+          console.error(`⚠️  Email attempt ${attempt}/${retries} failed:`, error.message);
+          
+          if (attempt === retries) {
+            throw error; // Last attempt failed, throw error
+          }
+          
+          // Wait before retry (exponential backoff)
+          const waitTime = delay * Math.pow(2, attempt - 1);
+          console.log(`🔄 Retrying in ${waitTime}ms...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+    };
+
     try {
+      console.log('📤 Sending emails...');
       await Promise.all([
-        transporter.sendMail(mailOptions),
-        transporter.sendMail(autoReplyOptions)
+        sendWithRetry(mailOptions),
+        sendWithRetry(autoReplyOptions)
       ]);
       console.log('✅ Emails sent successfully to:', email);
     } catch (emailError) {
-      console.error('❌ Email sending failed:', emailError.message);
+      console.error('❌ Email sending failed after all retries:', emailError.message);
       
       // Provide specific error messages
       if (emailError.code === 'ETIMEDOUT') {
-        throw new Error('Email service timeout. Please check SMTP server configuration and network connectivity.');
+        throw new Error('Email service timeout. The server could not connect to the email service. This may be due to network restrictions on the hosting platform.');
       } else if (emailError.code === 'EAUTH') {
-        throw new Error('Email authentication failed. Please check SMTP credentials.');
+        throw new Error('Email authentication failed. Please verify SMTP credentials are correct.');
       } else if (emailError.code === 'ECONNECTION') {
-        throw new Error('Cannot connect to email server. Please check SMTP server and port.');
+        throw new Error('Cannot connect to email server. Please verify SMTP server and port settings.');
       } else {
         throw emailError;
       }
