@@ -11,9 +11,7 @@ const PORT = process.env.PORT || 3001;
 console.log('🔧 Environment Configuration:');
 console.log('  NODE_ENV:', process.env.NODE_ENV || 'Not set');
 console.log('  PORT:', PORT);
-console.log('  BREVO_SMTP_SERVER:', process.env.BREVO_SMTP_SERVER || 'Not set');
-console.log('  BREVO_SMTP_PORT:', process.env.BREVO_SMTP_PORT || 'Not set');
-console.log('  BREVO_SMTP_EMAIL:', process.env.BREVO_SMTP_EMAIL ? '✓ Set' : '✗ Not set');
+console.log('  BREVO_API_KEY:', process.env.BREVO_API_KEY ? '✓ Set' : '✗ Not set');
 console.log('  BREVO_FROM_EMAIL:', process.env.BREVO_FROM_EMAIL || 'Not set');
 
 // Validate required environment variables

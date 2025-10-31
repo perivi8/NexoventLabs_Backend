@@ -1,41 +1,49 @@
 # Deployment Guide - Render
 
-## ✅ Email Configuration Fixed
+## ✅ Email Configuration Fixed - Using Brevo API
 
-The SMTP port has been updated from **465** to **587** to resolve connection timeout issues on Render.
+**IMPORTANT:** Render blocks SMTP connections, so we now use **Brevo HTTP API** instead.
 
 ---
 
 ## 📋 Deployment Steps
 
-### 1. Update Environment Variables in Render Dashboard
+### 1. Get Brevo API Key
 
-Go to your Render service → **Environment** tab and ensure these variables are set:
+1. Login to [Brevo Dashboard](https://app.brevo.com/)
+2. Go to **Settings** → **SMTP & API**
+3. Click **API Keys** tab
+4. Generate a new API key (v3)
+5. Copy the key (format: `xkeysib-...`)
+
+### 2. Update Environment Variables in Render Dashboard
+
+Go to your Render service → **Environment** tab and set these variables:
 
 ```
-BREVO_API_KEY=your_brevo_api_key_here
-BREVO_FROM_EMAIL=your_email@example.com
-BREVO_FROM_NAME=Your Company Name
-BREVO_SMTP_EMAIL=your_smtp_email@smtp-brevo.com
-BREVO_SMTP_PASSWORD=your_smtp_password_here
-BREVO_SMTP_PORT=587
-BREVO_SMTP_SERVER=smtp-relay.brevo.com
+BREVO_API_KEY=xkeysib-your-actual-api-key-here
+BREVO_FROM_EMAIL=nexoventlabs@gmail.com
+BREVO_FROM_NAME=NexoventLabs
 NODE_ENV=production
 PORT=3001
 ```
 
-**IMPORTANT:** Make sure `BREVO_SMTP_PORT` is set to **587** (not 465)
+**IMPORTANT:** Remove old SMTP variables if they exist:
+- ❌ BREVO_SMTP_SERVER
+- ❌ BREVO_SMTP_PORT
+- ❌ BREVO_SMTP_EMAIL
+- ❌ BREVO_SMTP_PASSWORD
 
 ---
 
-### 2. Deploy to Render
+### 3. Deploy to Render
 
 #### Option A: Using render.yaml (Recommended)
-The `render.yaml` file has been updated with the correct port. Simply push your code:
+Simply push your code:
 
 ```bash
 git add .
-git commit -m "Fix: Update SMTP port to 587 for Render deployment"
+git commit -m "Fix: Switch to Brevo API for email (Render blocks SMTP)"
 git push
 ```
 
@@ -48,15 +56,16 @@ Render will automatically deploy using the updated configuration.
 
 ---
 
-### 3. Verify Deployment
+### 4. Verify Deployment
 
 After deployment completes, check the logs for:
 
 ```
-✅ Email server is ready to send messages
+✅ Email service configured using Brevo API
 📧 From: nexoventlabs@gmail.com
-🔧 SMTP Server: smtp-relay.brevo.com
-🔌 Port: 587 (Secure: No )
+🔧 API Method: HTTP (SMTP blocked on Render)
+💡 Using Brevo API v3 for reliable email delivery
+🚀 Server is running on port 3001
 ```
 
 If you see this, the email service is configured correctly!
@@ -90,15 +99,17 @@ Expected response:
 ```json
 {
   "success": true,
-  "message": "Email service is working",
+  "message": "Test email sent successfully! Check your inbox at nexoventlabs@gmail.com",
   "config": {
-    "host": "smtp-relay.brevo.com",
-    "port": "587",
+    "method": "Brevo API v3",
+    "apiUrl": "https://api.brevo.com/v3/smtp/email",
     "from": "nexoventlabs@gmail.com",
-    "secure": false
+    "note": "Using HTTP API instead of SMTP (Render blocks SMTP ports)"
   }
 }
 ```
+
+**Check your inbox** - you should receive the test email!
 
 ### Test 3: Send Test Email
 ```bash
@@ -124,19 +135,28 @@ Expected response:
 
 ## 🔍 Troubleshooting
 
-### Issue: Still getting ETIMEDOUT error
+### Issue: "Missing required environment variables"
 
 **Solution:**
-1. Verify `BREVO_SMTP_PORT` is **587** in Render dashboard
-2. Restart the service after updating environment variables
-3. Check Render logs for any other errors
+1. Verify `BREVO_API_KEY` is set in Render dashboard
+2. Ensure `BREVO_FROM_EMAIL` and `BREVO_FROM_NAME` are set
+3. Restart the service after updating environment variables
+4. Check Render logs for specific missing variables
 
-### Issue: Authentication failed (EAUTH)
+### Issue: "Brevo API error: 401"
 
 **Solution:**
-1. Verify SMTP credentials are correct
-2. Check if Brevo API key is still valid
-3. Ensure `BREVO_SMTP_EMAIL` and `BREVO_SMTP_PASSWORD` match your Brevo account
+1. API key is invalid or expired
+2. Generate a new API key in Brevo dashboard
+3. Update `BREVO_API_KEY` in Render
+4. Redeploy the service
+
+### Issue: "Brevo API error: 400"
+
+**Solution:**
+1. Sender email not verified in Brevo
+2. Go to Brevo → Senders & IP → Add sender
+3. Verify `BREVO_FROM_EMAIL`
 
 ### Issue: Email not received
 
@@ -151,29 +171,33 @@ Expected response:
 
 | Setting | Value | Notes |
 |---------|-------|-------|
-| SMTP Server | smtp-relay.brevo.com | Brevo's SMTP relay |
-| SMTP Port | **587** | STARTTLS (recommended for Render) |
-| Secure | false | Auto-set based on port |
-| Connection Timeout | 30 seconds | Increased for Render free tier |
+| Email Method | Brevo API v3 | HTTP-based (SMTP blocked on Render) |
+| API Endpoint | https://api.brevo.com/v3/smtp/email | RESTful API |
+| Authentication | API Key | In request headers |
+| Timeout | 10 seconds | Fast HTTP requests |
 | Retry Attempts | 3 | With exponential backoff |
+| Rate Limit | 300/day, 9000/month | Brevo free tier |
 
 ---
 
-## ✅ Local Testing Results
+## ✅ Why Brevo API Instead of SMTP?
 
-All tests passed successfully:
+**Render blocks SMTP ports** (25, 465, 587) on the free tier to prevent spam.
 
-- ✅ Health Check: configured
-- ✅ Email Config: Valid (Port 587, Secure: false)
-- ✅ Email Sending: Success
-
-**Next Step:** Deploy to Render and verify in production environment.
+### Benefits of API:
+- ✅ Works on ALL hosting platforms
+- ✅ Faster (1-2s vs 30-60s timeout)
+- ✅ More reliable
+- ✅ Better error messages
+- ✅ Simpler configuration (3 vars vs 6)
+- ✅ No port restrictions
 
 ---
 
 ## 📝 Notes
 
-- Port **587** uses STARTTLS (secure: false)
-- Port **465** uses SSL/TLS (secure: true)
-- Render's network works better with port 587
-- The server automatically sets `secure` based on the port number
+- **SMTP is blocked on Render** - Don't try to use it!
+- API uses standard HTTP/HTTPS - Works everywhere
+- Same email templates and functionality
+- Frontend code unchanged
+- More modern and recommended by Brevo
