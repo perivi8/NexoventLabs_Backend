@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: nexoventlabs-backend
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+      - key: BREVO_FROM_NAME
+        sync: false
+      - key: BREVO_SMTP_EMAIL
+        sync: false
+      - key: BREVO_SMTP_PASSWORD
+        sync: false
+      - key: BREVO_SMTP_PORT
+        value: 587
+      - key: BREVO_SMTP_SERVER
+        value: smtp-relay.brevo.com
