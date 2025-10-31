@@ -1,5 +1,4 @@
 import express from 'express';
-import nodemailer from 'nodemailer';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
@@ -19,10 +18,7 @@ console.log('  BREVO_FROM_EMAIL:', process.env.BREVO_FROM_EMAIL || 'Not set');
 
 // Validate required environment variables
 const requiredEnvVars = [
-  'BREVO_SMTP_SERVER',
-  'BREVO_SMTP_PORT',
-  'BREVO_SMTP_EMAIL',
-  'BREVO_SMTP_PASSWORD',
+  'BREVO_API_KEY',
   'BREVO_FROM_EMAIL',
   'BREVO_FROM_NAME'
 ];
@@ -38,83 +34,40 @@ if (missingEnvVars.length > 0) {
 app.use(cors());
 app.use(express.json());
 
-// Email configuration using Brevo with enhanced timeout and connection settings
-const smtpPort = parseInt(process.env.BREVO_SMTP_PORT) || 587;
-const isSecure = smtpPort === 465; // Use TLS for port 465, STARTTLS for other ports
+// Email configuration using Brevo API (works on Render, unlike SMTP)
+// Render blocks outbound SMTP connections, so we use HTTP API instead
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
-const transporter = nodemailer.createTransport({
-  host: process.env.BREVO_SMTP_SERVER || 'smtp-relay.brevo.com',
-  port: smtpPort,
-  secure: isSecure, // true for 465, false for other ports
-  auth: {
-    user: process.env.BREVO_SMTP_EMAIL,
-    pass: process.env.BREVO_SMTP_PASSWORD,
-  },
-  // Enhanced connection settings for Render deployment
-  connectionTimeout: 60000, // 60 seconds (Render can be slow on cold starts)
-  greetingTimeout: 60000,
-  socketTimeout: 60000,
-  pool: true, // Use connection pooling
-  maxConnections: 5,
-  maxMessages: 100,
-  rateDelta: 1000,
-  rateLimit: 5,
-  // Additional settings for better reliability on Render
-  tls: {
-    rejectUnauthorized: false, // More permissive for Render's network
-    minVersion: 'TLSv1.2',
-    ciphers: 'SSLv3'
-  },
-  requireTLS: !isSecure, // Require TLS for port 587
-  debug: process.env.NODE_ENV !== 'production', // Enable debug in development
-  logger: process.env.NODE_ENV !== 'production' // Enable logging in development
-});
-
-// Store verification result
-let emailVerificationResult = {
-  verified: false,
-  error: null
-};
-
-// Verify transporter configuration with better error handling
-// Make verification non-blocking to allow server to start even if SMTP is slow
+// Verify API key is set
 if (missingEnvVars.length === 0) {
-  console.log('🔄 Verifying email connection (this may take up to 60 seconds)...');
-  console.log('💡 Note: Verification timeout is normal on Render - emails will still work!');
-  
-  // Set a timeout for verification to prevent hanging
-  const verificationTimeout = setTimeout(() => {
-    console.log('⏱️  Verification timeout reached - skipping verification');
-    console.log('✅ Server will continue - emails should work when actually sending');
-  }, 45000); // 45 seconds timeout
-  
-  transporter.verify((error, success) => {
-    clearTimeout(verificationTimeout);
-    if (error) {
-      emailVerificationResult.error = error;
-      console.error('⚠️  Email transporter verification failed:', error.message);
-      console.error('📋 Error code:', error.code);
-      console.error('📋 SMTP Server:', process.env.BREVO_SMTP_SERVER);
-      console.error('📋 SMTP Port:', process.env.BREVO_SMTP_PORT);
-      console.error('📋 SMTP Email:', process.env.BREVO_SMTP_EMAIL ? '✓ Set' : '✗ Missing');
-      console.error('📋 SMTP Password:', process.env.BREVO_SMTP_PASSWORD ? '✓ Set' : '✗ Missing');
-      console.error('');
-      console.error('⚠️  WARNING: Email verification failed, but server will continue.');
-      console.error('💡 This is NORMAL on Render due to network restrictions.');
-      console.error('💡 Emails WILL work when actually sending - this is just a verification issue.');
-      console.error('💡 Test the /api/contact endpoint to confirm email functionality.');
-      console.error('');
-    } else {
-      emailVerificationResult.verified = true;
-      console.log('✅ Email server is ready to send messages');
-      console.log('📧 From:', process.env.BREVO_FROM_EMAIL);
-      console.log('🔧 SMTP Server:', process.env.BREVO_SMTP_SERVER);
-      console.log('🔌 Port:', smtpPort, '(Secure:', isSecure ? 'Yes' : 'No', ')');
-    }
-  });
+  console.log('✅ Email service configured using Brevo API');
+  console.log('📧 From:', process.env.BREVO_FROM_EMAIL);
+  console.log('🔧 API Method: HTTP (SMTP blocked on Render)');
+  console.log('💡 Using Brevo API v3 for reliable email delivery');
 } else {
-  console.log('⚠️  Skipping email verification due to missing environment variables');
+  console.log('⚠️  Email service not configured - missing variables');
 }
+
+// Helper function to send email via Brevo API
+const sendEmailViaBrevoAPI = async (emailData) => {
+  const response = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'accept': 'application/json',
+      'api-key': BREVO_API_KEY,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(emailData)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`Brevo API error: ${response.status} - ${errorData.message || response.statusText}`);
+  }
+
+  return await response.json();
+};
 
 // Contact form endpoint
 app.post('/api/contact', async (req, res) => {
@@ -148,11 +101,21 @@ app.post('/api/contact', async (req, res) => {
     }
 
     // Email content to admin (beautiful template matching website theme)
-    const mailOptions = {
-      from: `${process.env.BREVO_FROM_NAME} <${process.env.BREVO_FROM_EMAIL}>`,
-      to: process.env.BREVO_FROM_EMAIL,
+    const adminEmailData = {
+      sender: {
+        name: process.env.BREVO_FROM_NAME,
+        email: process.env.BREVO_FROM_EMAIL
+      },
+      to: [{
+        email: process.env.BREVO_FROM_EMAIL,
+        name: 'Admin'
+      }],
       subject: `🔔 New Contact Form Submission from ${name}`,
-      html: `
+      replyTo: {
+        email: email,
+        name: name
+      },
+      htmlContent: `
         <html>
         <head>
           <meta charset="UTF-8">
@@ -217,7 +180,7 @@ app.post('/api/contact', async (req, res) => {
         </body>
         </html>
       `,
-      text: `
+      textContent: `
 🔔 NEW CONTACT FORM SUBMISSION
 
 Contact Details:
@@ -239,11 +202,17 @@ NexoventLabs Contact Form
     };
 
     // Auto-reply email to the user
-    const autoReplyOptions = {
-      from: `${process.env.BREVO_FROM_NAME} <${process.env.BREVO_FROM_EMAIL}>`,
-      to: email,
+    const autoReplyEmailData = {
+      sender: {
+        name: process.env.BREVO_FROM_NAME,
+        email: process.env.BREVO_FROM_EMAIL
+      },
+      to: [{
+        email: email,
+        name: name
+      }],
       subject: 'Thank You for Contacting NexoventLabs! 🚀',
-      html: `
+      htmlContent: `
         <!DOCTYPE html>
         <html>
         <head>
@@ -305,7 +274,7 @@ NexoventLabs Contact Form
         </body>
         </html>
       `,
-      text: `
+      textContent: `
 Hi ${name}!
 
 Thank you for reaching out to NexoventLabs!
@@ -339,18 +308,13 @@ Andhra Pradesh, India
     }
 
     // Send both emails with retry logic (3 attempts with exponential backoff)
-    const sendWithRetry = async (mailOptions, retries = 3, delay = 2000) => {
+    const sendWithRetry = async (emailData, retries = 3, delay = 1000) => {
       for (let attempt = 1; attempt <= retries; attempt++) {
         try {
-          await transporter.sendMail(mailOptions);
+          await sendEmailViaBrevoAPI(emailData);
           return true;
         } catch (error) {
           console.error(`⚠️  Email attempt ${attempt}/${retries} failed:`, error.message);
-          
-          // If it's a timeout error on port 587, suggest trying port 465
-          if (error.code === 'ETIMEDOUT' && smtpPort === 587) {
-            console.error('💡 Tip: Try changing BREVO_SMTP_PORT to 465 in your environment variables');
-          }
           
           if (attempt === retries) {
             throw error; // Last attempt failed, throw error
@@ -365,25 +329,15 @@ Andhra Pradesh, India
     };
 
     try {
-      console.log('📤 Sending emails...');
+      console.log('📤 Sending emails via Brevo API...');
       await Promise.all([
-        sendWithRetry(mailOptions),
-        sendWithRetry(autoReplyOptions)
+        sendWithRetry(adminEmailData),
+        sendWithRetry(autoReplyEmailData)
       ]);
       console.log('✅ Emails sent successfully to:', email);
     } catch (emailError) {
       console.error('❌ Email sending failed after all retries:', emailError.message);
-      
-      // Provide specific error messages
-      if (emailError.code === 'ETIMEDOUT') {
-        throw new Error('Email service timeout. The server could not connect to the email service. This may be due to network restrictions on the hosting platform.');
-      } else if (emailError.code === 'EAUTH') {
-        throw new Error('Email authentication failed. Please verify SMTP credentials are correct.');
-      } else if (emailError.code === 'ECONNECTION') {
-        throw new Error('Cannot connect to email server. Please verify SMTP server and port settings.');
-      } else {
-        throw emailError;
-      }
+      throw new Error('Failed to send email via Brevo API. Please check API key and try again.');
     }
 
     res.status(200).json({ 
@@ -429,24 +383,31 @@ app.get('/api/test-email', async (req, res) => {
   }
 
   try {
-    console.log('📧 Sending test email...');
+    console.log('📧 Sending test email via Brevo API...');
     
     // Send actual test email
-    await transporter.sendMail({
-      from: `${process.env.BREVO_FROM_NAME} <${process.env.BREVO_FROM_EMAIL}>`,
-      to: process.env.BREVO_FROM_EMAIL,
+    const testEmailData = {
+      sender: {
+        name: process.env.BREVO_FROM_NAME,
+        email: process.env.BREVO_FROM_EMAIL
+      },
+      to: [{
+        email: process.env.BREVO_FROM_EMAIL,
+        name: 'Admin'
+      }],
       subject: '✅ Test Email - Render Deployment',
-      html: `
+      htmlContent: `
         <h2>Email Service Test</h2>
         <p>This is a test email from your Render deployment.</p>
         <p><strong>Status:</strong> ✅ Email service is working correctly!</p>
-        <p><strong>SMTP Server:</strong> ${process.env.BREVO_SMTP_SERVER}</p>
-        <p><strong>Port:</strong> ${process.env.BREVO_SMTP_PORT}</p>
-        <p><strong>Secure:</strong> ${isSecure ? 'Yes (SSL/TLS)' : 'No (STARTTLS)'}</p>
+        <p><strong>Method:</strong> Brevo API v3 (HTTP)</p>
+        <p><strong>Platform:</strong> Render (SMTP blocked, using API instead)</p>
         <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
       `,
-      text: `Email Service Test\n\nThis is a test email from your Render deployment.\nStatus: Email service is working correctly!\nSMTP Server: ${process.env.BREVO_SMTP_SERVER}\nPort: ${process.env.BREVO_SMTP_PORT}\nTime: ${new Date().toLocaleString()}`
-    });
+      textContent: `Email Service Test\n\nThis is a test email from your Render deployment.\nStatus: Email service is working correctly!\nMethod: Brevo API v3 (HTTP)\nPlatform: Render\nTime: ${new Date().toLocaleString()}`
+    };
+    
+    await sendEmailViaBrevoAPI(testEmailData);
     
     console.log('✅ Test email sent successfully!');
     
@@ -454,11 +415,10 @@ app.get('/api/test-email', async (req, res) => {
       success: true,
       message: 'Test email sent successfully! Check your inbox at ' + process.env.BREVO_FROM_EMAIL,
       config: {
-        host: process.env.BREVO_SMTP_SERVER,
-        port: process.env.BREVO_SMTP_PORT,
+        method: 'Brevo API v3',
+        apiUrl: BREVO_API_URL,
         from: process.env.BREVO_FROM_EMAIL,
-        secure: isSecure,
-        verificationStatus: emailVerificationResult.verified ? 'verified' : 'not verified (but email still works!)'
+        note: 'Using HTTP API instead of SMTP (Render blocks SMTP ports)'
       }
     });
   } catch (error) {
@@ -466,8 +426,7 @@ app.get('/api/test-email', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to send test email: ' + error.message,
-      code: error.code,
-      note: 'If verification failed but this endpoint works, emails are functioning correctly!'
+      note: 'Check BREVO_API_KEY in environment variables'
     });
   }
 });
