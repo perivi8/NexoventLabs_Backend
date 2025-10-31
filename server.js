@@ -8,29 +8,73 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Validate required environment variables
+const requiredEnvVars = [
+  'BREVO_SMTP_SERVER',
+  'BREVO_SMTP_PORT',
+  'BREVO_SMTP_EMAIL',
+  'BREVO_SMTP_PASSWORD',
+  'BREVO_FROM_EMAIL',
+  'BREVO_FROM_NAME'
+];
+
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+if (missingEnvVars.length > 0) {
+  console.error('❌ Missing required environment variables:', missingEnvVars.join(', '));
+  console.error('⚠️  Email functionality will not work properly!');
+  console.error('📝 Please set these variables in your Render dashboard or .env file');
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Email configuration using Brevo (better for HTML templates)
+// Email configuration using Brevo with enhanced timeout and connection settings
 const transporter = nodemailer.createTransport({
-  host: process.env.BREVO_SMTP_SERVER,
-  port: parseInt(process.env.BREVO_SMTP_PORT),
+  host: process.env.BREVO_SMTP_SERVER || 'smtp-relay.brevo.com',
+  port: parseInt(process.env.BREVO_SMTP_PORT) || 587,
   secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.BREVO_SMTP_EMAIL,
     pass: process.env.BREVO_SMTP_PASSWORD,
   },
+  // Enhanced connection settings for Render deployment
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
+  pool: true, // Use connection pooling
+  maxConnections: 5,
+  maxMessages: 100,
+  rateDelta: 1000,
+  rateLimit: 5,
+  // Additional settings for better reliability
+  tls: {
+    rejectUnauthorized: true,
+    minVersion: 'TLSv1.2'
+  },
+  debug: process.env.NODE_ENV !== 'production', // Enable debug in development
+  logger: process.env.NODE_ENV !== 'production' // Enable logging in development
 });
 
-// Verify transporter configuration
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Email transporter error:', error);
-  } else {
-    console.log('Email server is ready to send messages');
-  }
-});
+// Verify transporter configuration with better error handling
+if (missingEnvVars.length === 0) {
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('❌ Email transporter verification failed:', error.message);
+      console.error('🔍 Check your Brevo SMTP credentials in environment variables');
+      console.error('📋 SMTP Server:', process.env.BREVO_SMTP_SERVER);
+      console.error('📋 SMTP Port:', process.env.BREVO_SMTP_PORT);
+      console.error('📋 SMTP Email:', process.env.BREVO_SMTP_EMAIL ? '✓ Set' : '✗ Missing');
+      console.error('📋 SMTP Password:', process.env.BREVO_SMTP_PASSWORD ? '✓ Set' : '✗ Missing');
+    } else {
+      console.log('✅ Email server is ready to send messages');
+      console.log('📧 From:', process.env.BREVO_FROM_EMAIL);
+      console.log('🔧 SMTP Server:', process.env.BREVO_SMTP_SERVER);
+    }
+  });
+} else {
+  console.log('⚠️  Skipping email verification due to missing environment variables');
+}
 
 // Contact form endpoint
 app.post('/api/contact', async (req, res) => {
@@ -245,11 +289,36 @@ Andhra Pradesh, India
       `,
     };
 
-    // Send both emails
-    await Promise.all([
-      transporter.sendMail(mailOptions),
-      transporter.sendMail(autoReplyOptions)
-    ]);
+    // Check if email configuration is valid
+    if (missingEnvVars.length > 0) {
+      console.error('❌ Cannot send email: Missing environment variables:', missingEnvVars.join(', '));
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Email service is not configured properly. Please contact the administrator.' 
+      });
+    }
+
+    // Send both emails with retry logic
+    try {
+      await Promise.all([
+        transporter.sendMail(mailOptions),
+        transporter.sendMail(autoReplyOptions)
+      ]);
+      console.log('✅ Emails sent successfully to:', email);
+    } catch (emailError) {
+      console.error('❌ Email sending failed:', emailError.message);
+      
+      // Provide specific error messages
+      if (emailError.code === 'ETIMEDOUT') {
+        throw new Error('Email service timeout. Please check SMTP server configuration and network connectivity.');
+      } else if (emailError.code === 'EAUTH') {
+        throw new Error('Email authentication failed. Please check SMTP credentials.');
+      } else if (emailError.code === 'ECONNECTION') {
+        throw new Error('Cannot connect to email server. Please check SMTP server and port.');
+      } else {
+        throw emailError;
+      }
+    }
 
     res.status(200).json({ 
       success: true, 
@@ -257,19 +326,69 @@ Andhra Pradesh, India
     });
 
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('❌ Error in contact endpoint:', error.message);
+    
+    // Log additional details for debugging
+    if (error.code) {
+      console.error('Error code:', error.code);
+    }
+    
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to send email. Please try again later.' 
+      message: error.message || 'Failed to send email. Please try again later.' 
     });
   }
 });
 
-// Health check endpoint
+// Health check endpoint with email service status
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Server is running' });
+  const emailConfigured = missingEnvVars.length === 0;
+  res.json({ 
+    status: 'ok', 
+    message: 'Server is running',
+    emailService: emailConfigured ? 'configured' : 'not configured',
+    missingVars: emailConfigured ? [] : missingEnvVars,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Test email endpoint (for debugging - remove in production)
+app.get('/api/test-email', async (req, res) => {
+  if (missingEnvVars.length > 0) {
+    return res.status(500).json({
+      success: false,
+      message: 'Email not configured',
+      missingVars: missingEnvVars
+    });
+  }
+
+  try {
+    await transporter.verify();
+    res.json({
+      success: true,
+      message: 'Email service is working',
+      config: {
+        host: process.env.BREVO_SMTP_SERVER,
+        port: process.env.BREVO_SMTP_PORT,
+        from: process.env.BREVO_FROM_EMAIL
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      code: error.code
+    });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log('🚀 ================================');
+  console.log(`✅ Server is running on port ${PORT}`);
+  console.log('🌐 Environment:', process.env.NODE_ENV || 'development');
+  console.log('📧 Email configured:', missingEnvVars.length === 0 ? '✓ Yes' : '✗ No');
+  if (missingEnvVars.length > 0) {
+    console.log('⚠️  Missing variables:', missingEnvVars.join(', '));
+  }
+  console.log('🚀 ================================');
 });
