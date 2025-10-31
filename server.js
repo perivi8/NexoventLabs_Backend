@@ -30,10 +30,13 @@ app.use(cors());
 app.use(express.json());
 
 // Email configuration using Brevo with enhanced timeout and connection settings
+const smtpPort = parseInt(process.env.BREVO_SMTP_PORT) || 587;
+const isSecure = smtpPort === 465; // Use TLS for port 465, STARTTLS for other ports
+
 const transporter = nodemailer.createTransport({
   host: process.env.BREVO_SMTP_SERVER || 'smtp-relay.brevo.com',
-  port: parseInt(process.env.BREVO_SMTP_PORT) || 587,
-  secure: false, // true for 465, false for other ports
+  port: smtpPort,
+  secure: isSecure, // true for 465, false for other ports
   auth: {
     user: process.env.BREVO_SMTP_EMAIL,
     pass: process.env.BREVO_SMTP_PASSWORD,
@@ -72,12 +75,23 @@ if (missingEnvVars.length === 0) {
       console.error('');
       console.error('⚠️  WARNING: Email verification failed, but server will continue.');
       console.error('💡 Emails may still work when actually sending.');
-      console.error('💡 If emails fail, try using port 465 instead of 587.');
+      
+      // Provide specific guidance based on the port being used
+      if (smtpPort === 587) {
+        console.error('💡 Try changing BREVO_SMTP_PORT to 465 in your environment variables');
+        console.error('💡 Also ensure secure is set to true for port 465 in the transporter config');
+      } else if (smtpPort === 465) {
+        console.error('💡 Ensure secure is set to true for port 465 in the transporter config');
+      } else {
+        console.error('💡 Check if the SMTP port is correct for your email provider');
+      }
+      
       console.error('');
     } else {
       console.log('✅ Email server is ready to send messages');
       console.log('📧 From:', process.env.BREVO_FROM_EMAIL);
       console.log('🔧 SMTP Server:', process.env.BREVO_SMTP_SERVER);
+      console.log('🔌 Port:', smtpPort, '(Secure:', isSecure ? 'Yes' : 'No', ')');
     }
   });
 } else {
@@ -314,6 +328,11 @@ Andhra Pradesh, India
           return true;
         } catch (error) {
           console.error(`⚠️  Email attempt ${attempt}/${retries} failed:`, error.message);
+          
+          // If it's a timeout error on port 587, suggest trying port 465
+          if (error.code === 'ETIMEDOUT' && smtpPort === 587) {
+            console.error('💡 Tip: Try changing BREVO_SMTP_PORT to 465 in your environment variables');
+          }
           
           if (attempt === retries) {
             throw error; // Last attempt failed, throw error
