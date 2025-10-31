@@ -8,6 +8,15 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Log environment variables for debugging (exclude sensitive ones)
+console.log('🔧 Environment Configuration:');
+console.log('  NODE_ENV:', process.env.NODE_ENV || 'Not set');
+console.log('  PORT:', PORT);
+console.log('  BREVO_SMTP_SERVER:', process.env.BREVO_SMTP_SERVER || 'Not set');
+console.log('  BREVO_SMTP_PORT:', process.env.BREVO_SMTP_PORT || 'Not set');
+console.log('  BREVO_SMTP_EMAIL:', process.env.BREVO_SMTP_EMAIL ? '✓ Set' : '✗ Not set');
+console.log('  BREVO_FROM_EMAIL:', process.env.BREVO_FROM_EMAIL || 'Not set');
+
 // Validate required environment variables
 const requiredEnvVars = [
   'BREVO_SMTP_SERVER',
@@ -59,6 +68,12 @@ const transporter = nodemailer.createTransport({
   logger: process.env.NODE_ENV !== 'production' // Enable logging in development
 });
 
+// Store verification result
+let emailVerificationResult = {
+  verified: false,
+  error: null
+};
+
 // Verify transporter configuration with better error handling
 // Make verification non-blocking to allow server to start even if SMTP is slow
 if (missingEnvVars.length === 0) {
@@ -66,6 +81,7 @@ if (missingEnvVars.length === 0) {
   
   transporter.verify((error, success) => {
     if (error) {
+      emailVerificationResult.error = error;
       console.error('⚠️  Email transporter verification failed:', error.message);
       console.error('📋 Error code:', error.code);
       console.error('📋 SMTP Server:', process.env.BREVO_SMTP_SERVER);
@@ -88,6 +104,7 @@ if (missingEnvVars.length === 0) {
       
       console.error('');
     } else {
+      emailVerificationResult.verified = true;
       console.log('✅ Email server is ready to send messages');
       console.log('📧 From:', process.env.BREVO_FROM_EMAIL);
       console.log('🔧 SMTP Server:', process.env.BREVO_SMTP_SERVER);
@@ -411,14 +428,24 @@ app.get('/api/test-email', async (req, res) => {
   }
 
   try {
-    await transporter.verify();
+    // Use the stored verification result if available
+    if (emailVerificationResult.error) {
+      throw emailVerificationResult.error;
+    }
+    
+    if (!emailVerificationResult.verified) {
+      // Try to verify again if not yet verified
+      await transporter.verify();
+    }
+    
     res.json({
       success: true,
       message: 'Email service is working',
       config: {
         host: process.env.BREVO_SMTP_SERVER,
         port: process.env.BREVO_SMTP_PORT,
-        from: process.env.BREVO_FROM_EMAIL
+        from: process.env.BREVO_FROM_EMAIL,
+        secure: isSecure
       }
     });
   } catch (error) {
