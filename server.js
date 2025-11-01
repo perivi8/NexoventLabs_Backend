@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 dotenv.config();
 
@@ -13,6 +14,7 @@ console.log('  NODE_ENV:', process.env.NODE_ENV || 'Not set');
 console.log('  PORT:', PORT);
 console.log('  BREVO_API_KEY:', process.env.BREVO_API_KEY ? '✓ Set' : '✗ Not set');
 console.log('  BREVO_FROM_EMAIL:', process.env.BREVO_FROM_EMAIL || 'Not set');
+console.log('  GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✓ Set' : '✗ Not set');
 
 // Validate required environment variables
 const requiredEnvVars = [
@@ -594,6 +596,150 @@ app.get('/api/test-email', async (req, res) => {
   }
 });
 
+// Chatbot endpoint - handles AI chat requests
+app.post('/api/chatbot', async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const { message, conversationHistory } = req.body;
+
+    console.log('\n🤖 ================================');
+    console.log('📥 Chatbot Request Received');
+    console.log('🕐 Time:', new Date().toLocaleTimeString());
+
+    // Validation
+    if (!message || typeof message !== 'string') {
+      console.log('❌ Validation failed: Invalid message format');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Message is required and must be a string' 
+      });
+    }
+
+    // Check if Gemini API key is configured
+    if (!process.env.GEMINI_API_KEY) {
+      console.error('❌ GEMINI_API_KEY not configured');
+      console.log('⚠️  Please add GEMINI_API_KEY to your .env file');
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Chatbot service is not configured. Please contact the administrator.' 
+      });
+    }
+
+    console.log('✅ API Key: Configured');
+    console.log('📝 User Message:', message.substring(0, 80) + (message.length > 80 ? '...' : ''));
+    console.log('💬 Conversation History:', conversationHistory ? `${conversationHistory.length} messages` : 'None');
+
+    // Initialize Gemini AI
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    // Use gemini-2.0-flash - stable, fast, and supports generateContent
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-2.0-flash'
+    });
+
+    // Website knowledge base
+    const websiteKnowledge = `
+You are a helpful AI assistant for NexoventLabs, an AI solutions company. You should provide accurate information about the company based on the following details:
+
+## COMPANY INFORMATION
+Company Name: NexoventLabs
+Mission: Transform businesses through innovative AI solutions that drive growth, efficiency, and unprecedented insights.
+Founded by: A team of AI researchers and industry veterans
+Approach: Combine cutting-edge research with practical applications to deliver real-world impact
+
+## CONTACT INFORMATION
+Email: nexoventlabs@gmail.com
+Phone: +91 8106811285
+Address: Andhra Pradesh, India
+Social Media:
+- Twitter: https://twitter.com/nexoventlabs
+- Instagram: https://instagram.com/nexoventlabs
+- LinkedIn: https://linkedin.com/company/nexoventlabs
+
+## SERVICES OFFERED
+1. Machine Learning - Advanced ML models that learn and adapt to business needs
+2. Neural Networks - Deep learning solutions for complex pattern recognition
+3. Data Analytics - Transform raw data into actionable business intelligence
+4. AI Automation - Streamline operations with intelligent automation systems
+5. Website Development - Modern, responsive websites built with cutting-edge technologies
+6. Real-time Processing - Lightning-fast AI inference for real-time applications
+
+## TEAM MEMBERS
+1. Perivi Harikrishna - Chief AI Officer (Expertise: Deep Learning & Neural Networks)
+2. Gali Vijay - Lead ML Engineer (Expertise: Computer Vision & Robotics)
+
+## FEATURED PROJECTS
+1. AI Vision System (Computer Vision) - Real-time object detection and classification for autonomous systems
+2. NLP Engine (Natural Language) - Advanced language understanding for customer service automation
+3. Predictive Analytics (Data Science) - ML-powered forecasting system for enterprise decision making
+4. Neural Optimization (Deep Learning) - Optimizing complex systems using reinforcement learning
+
+## CAREER OPPORTUNITIES
+1. Senior ML Engineer - San Francisco, CA (Full-time) - Build cutting-edge ML models for real-world applications
+2. AI Research Scientist - Remote (Full-time) - Push the boundaries of AI research and innovation
+3. Data Engineer - New York, NY (Full-time) - Design and maintain scalable data infrastructure
+4. AI Product Manager - London, UK (Full-time) - Lead product strategy for AI-powered solutions
+
+## INSTRUCTIONS
+- Be friendly, professional, and helpful
+- Provide accurate information based on the knowledge above
+- If asked about jobs/careers, list all positions with details
+- If asked about contact info, provide email, phone, and address
+- If asked to apply for a job, direct them to contact via email: nexoventlabs@gmail.com
+- If asked about something not in this knowledge base, politely say you don't have that specific information
+- Keep responses concise and friendly
+`;
+
+    // Build the prompt with conversation history if provided
+    let prompt = websiteKnowledge + '\n\n';
+    
+    if (conversationHistory && Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+      prompt += 'Previous conversation:\n';
+      conversationHistory.forEach(msg => {
+        prompt += `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.text}\n`;
+      });
+      prompt += '\n';
+    }
+    
+    prompt += `User Question: ${message}\n\nPlease provide a helpful, accurate response based on the knowledge base above. Keep your response concise and friendly.`;
+
+    // Generate response
+    console.log('🔄 Generating AI response...');
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const botResponse = response.text();
+
+    const processingTime = Date.now() - startTime;
+    console.log('✅ Response Generated Successfully');
+    console.log('📤 Response Length:', botResponse.length, 'characters');
+    console.log('⚡ Processing Time:', processingTime, 'ms');
+    console.log('📝 Preview:', botResponse.substring(0, 80) + (botResponse.length > 80 ? '...' : ''));
+    console.log('🤖 ================================\n');
+
+    res.status(200).json({ 
+      success: true, 
+      response: botResponse,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    const processingTime = Date.now() - startTime;
+    console.error('❌ Chatbot Error:', error.message);
+    console.error('⏱️  Failed after:', processingTime, 'ms');
+    console.error('📋 Error Type:', error.name);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('🔍 Stack:', error.stack);
+    }
+    console.log('🤖 ================================\n');
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Sorry, I encountered an error. Please try again or contact us directly at nexoventlabs@gmail.com',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log('🚀 ================================');
   console.log(`✅ Server is running on port ${PORT}`);
@@ -602,5 +748,11 @@ app.listen(PORT, () => {
   if (missingEnvVars.length > 0) {
     console.log('⚠️  Missing variables:', missingEnvVars.join(', '));
   }
+  console.log('🤖 Chatbot API:', process.env.GEMINI_API_KEY ? '✓ Connected & Ready' : '✗ Not Configured');
+  console.log('📡 API Endpoints:');
+  console.log('   - POST /api/contact (Email Service)');
+  console.log('   - POST /api/chatbot (AI Chatbot)');
+  console.log('   - GET  /api/health (Health Check)');
+  console.log('   - GET  /api/test-email (Email Test)');
   console.log('🚀 ================================');
 });
