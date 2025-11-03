@@ -79,16 +79,17 @@ const sendEmailViaBrevoAPI = async (emailData) => {
 
 // Root endpoint - API welcome message (JSON only)
 app.get('/', (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
     message: 'NexoventLabs Backend API',
     status: 'running',
     version: '1.0.0',
     endpoints: {
-      health: '/api/health',
+      ping: 'GET /api/ping',
+      health: 'GET /api/health',
       contact: 'POST /api/contact',
       chatbot: 'POST /api/chatbot',
-      testEmail: '/api/test-email'
+      testEmail: 'GET /api/test-email'
     },
     documentation: 'https://github.com/nexoventlabs',
     timestamp: new Date().toISOString()
@@ -394,14 +395,25 @@ Andhra Pradesh, India
   }
 });
 
+// Simple ping endpoint for cron jobs (minimal response)
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({ 
+    success: true,
+    status: 'ok',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Health check endpoint with email service status
 app.get('/api/health', (req, res) => {
   const emailConfigured = missingEnvVars.length === 0;
-  res.json({ 
+  res.status(200).json({ 
+    success: true,
     status: 'ok', 
     message: 'Server is running',
     emailService: emailConfigured ? 'configured' : 'not configured',
     missingVars: emailConfigured ? [] : missingEnvVars,
+    uptime: process.uptime(),
     timestamp: new Date().toISOString()
   });
 });
@@ -619,9 +631,11 @@ app.listen(PORT, () => {
   }
   console.log('🤖 Chatbot API:', process.env.GEMINI_API_KEY ? '✓ Connected & Ready' : '✗ Not Configured');
   console.log('📡 API Endpoints:');
+  console.log('   - GET  /api/ping (Cron Job Ping)');
+  console.log('   - GET  /api/health (Health Check)');
   console.log('   - POST /api/contact (Email Service)');
   console.log('   - POST /api/chatbot (AI Chatbot)');
-  console.log('   - GET  /api/health (Health Check)');
   console.log('   - GET  /api/test-email (Email Test)');
+  console.log('💡 Tip: Use /api/ping for cron jobs (fastest response)');
   console.log('🚀 ================================');
 });
