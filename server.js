@@ -482,7 +482,7 @@ app.post('/api/chatbot', async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { message, conversationHistory } = req.body;
+    const { message, conversationHistory, websiteKnowledge } = req.body;
 
     console.log('\n🤖 ================================');
     console.log('📥 Chatbot Request Received');
@@ -510,6 +510,15 @@ app.post('/api/chatbot', async (req, res) => {
     console.log('✅ API Key: Configured');
     console.log('📝 User Message:', message.substring(0, 80) + (message.length > 80 ? '...' : ''));
     console.log('💬 Conversation History:', conversationHistory ? `${conversationHistory.length} messages` : 'None');
+    console.log('🔄 Dynamic Knowledge:', websiteKnowledge ? `✓ Received (${websiteKnowledge.length} chars)` : '✗ MISSING');
+    
+    // Extract timestamp from knowledge to verify it's fresh
+    const timestampMatch = websiteKnowledge?.match(/Generated at ([^\]]+)/);
+    if (timestampMatch) {
+      console.log('⏰ Knowledge Generated At:', timestampMatch[1]);
+      const knowledgeAge = Date.now() - new Date(timestampMatch[1]).getTime();
+      console.log('📊 Knowledge Age:', Math.round(knowledgeAge / 1000), 'seconds');
+    }
 
     // Initialize Gemini AI
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -518,71 +527,54 @@ app.post('/api/chatbot', async (req, res) => {
       model: 'gemini-2.0-flash'
     });
 
-    // Website knowledge base
-    const websiteKnowledge = `
-You are a helpful AI assistant for NexoventLabs, an AI solutions company. You should provide accurate information about the company based on the following details:
+    // IMPORTANT: Always use fresh dynamic knowledge from frontend
+    // This ensures the chatbot shows current website data, not cached/old data
+    if (!websiteKnowledge) {
+      console.warn('⚠️ No dynamic knowledge received from frontend! Chatbot may have outdated information.');
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Unable to fetch current website data. Please refresh the page and try again.' 
+      });
+    }
 
-## COMPANY INFORMATION
-Company Name: NexoventLabs
-Mission: Transform businesses through innovative AI solutions that drive growth, efficiency, and unprecedented insights.
-Founded by: A team of AI researchers and industry veterans
-Approach: Combine cutting-edge research with practical applications to deliver real-world impact
+    const knowledgeBase = websiteKnowledge;
 
-## CONTACT INFORMATION
-Email: nexoventlabs@gmail.com
-Phone: +91 8106811285
-Address: Andhra Pradesh, India
-Social Media:
-- Twitter: https://twitter.com/nexoventlabs
-- Instagram: https://instagram.com/nexoventlabs
-- LinkedIn: https://linkedin.com/company/nexoventlabs
+    // Build the prompt with FRESH knowledge base taking priority
+    let prompt = `IMPORTANT: The following knowledge base contains CURRENT, UP-TO-DATE information about NexoventLabs. 
+ALWAYS use this fresh data to answer questions, even if previous conversation history contains different information.
+If there's any conflict between conversation history and this knowledge base, ALWAYS trust this knowledge base as it's the most current.
 
-## SERVICES OFFERED
-1. Machine Learning - Advanced ML models that learn and adapt to business needs
-2. Neural Networks - Deep learning solutions for complex pattern recognition
-3. Data Analytics - Transform raw data into actionable business intelligence
-4. AI Automation - Streamline operations with intelligent automation systems
-5. Website Development - Modern, responsive websites built with cutting-edge technologies
-6. Real-time Processing - Lightning-fast AI inference for real-time applications
+${knowledgeBase}
 
-## TEAM MEMBERS
-1. Perivi Harikrishna - Chief AI Officer (Expertise: Deep Learning & Neural Networks)
-2. Gali Vijay - Lead ML Engineer (Expertise: Computer Vision & Robotics)
-
-## FEATURED PROJECTS
-1. AI Vision System (Computer Vision) - Real-time object detection and classification for autonomous systems
-2. NLP Engine (Natural Language) - Advanced language understanding for customer service automation
-3. Predictive Analytics (Data Science) - ML-powered forecasting system for enterprise decision making
-4. Neural Optimization (Deep Learning) - Optimizing complex systems using reinforcement learning
-
-## CAREER OPPORTUNITIES
-1. Senior ML Engineer - San Francisco, CA (Full-time) - Build cutting-edge ML models for real-world applications
-2. AI Research Scientist - Remote (Full-time) - Push the boundaries of AI research and innovation
-3. Data Engineer - New York, NY (Full-time) - Design and maintain scalable data infrastructure
-4. AI Product Manager - London, UK (Full-time) - Lead product strategy for AI-powered solutions
-
-## INSTRUCTIONS
-- Be friendly, professional, and helpful
-- Provide accurate information based on the knowledge above
-- If asked about jobs/careers, list all positions with details
-- If asked about contact info, provide email, phone, and address
-- If asked to apply for a job, direct them to contact via email: nexoventlabs@gmail.com
-- If asked about something not in this knowledge base, politely say you don't have that specific information
-- Keep responses concise and friendly
 `;
-
-    // Build the prompt with conversation history if provided
-    let prompt = websiteKnowledge + '\n\n';
     
     if (conversationHistory && Array.isArray(conversationHistory) && conversationHistory.length > 0) {
-      prompt += 'Previous conversation:\n';
+      prompt += '## Previous conversation (for context only - use fresh knowledge base above for facts):\n';
       conversationHistory.forEach(msg => {
         prompt += `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.text}\n`;
       });
       prompt += '\n';
     }
     
-    prompt += `User Question: ${message}\n\nPlease provide a helpful, accurate response based on the knowledge base above. Keep your response concise and friendly.`;
+    prompt += `## Current User Question: ${message}
+
+CRITICAL INSTRUCTIONS:
+1. For NexoventLabs-specific questions (team, services, projects, careers, contact, about us):
+   - ALWAYS use the fresh knowledge base provided above
+   - Ignore any outdated information from previous conversation history
+   - The knowledge base is regenerated on every request with the latest website data
+
+2. For general questions (technology, programming, AI concepts, how-to questions, etc.):
+   - Use your general AI knowledge to provide helpful, accurate answers
+   - Be informative and educational
+   - When relevant, relate the answer back to NexoventLabs services
+   - Demonstrate technical expertise while being approachable
+
+3. Response Style:
+   - Keep responses concise, friendly, and professional
+   - Be helpful and engaging
+   - If unsure about NexoventLabs-specific details, direct to contact information
+   - Use your full AI capabilities to assist users`;
 
     // Generate response
     console.log('🔄 Generating AI response...');
