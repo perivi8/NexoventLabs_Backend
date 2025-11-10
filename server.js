@@ -8,6 +8,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Keep-alive tracking
+let lastPingTime = new Date();
+let pingCount = 0;
+const serverStartTime = new Date();
+
 // Log environment variables for debugging (exclude sensitive ones)
 console.log('🔧 Environment Configuration:');
 console.log('  NODE_ENV:', process.env.NODE_ENV || 'Not set');
@@ -397,25 +402,81 @@ Andhra Pradesh, India
 
 // Simple ping endpoint for cron jobs (minimal response)
 app.get('/api/ping', (req, res) => {
-  res.status(200).json({ 
-    success: true,
-    status: 'ok',
-    timestamp: new Date().toISOString()
-  });
+  try {
+    lastPingTime = new Date();
+    pingCount++;
+    
+    // Set headers to prevent caching
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    res.status(200).json({ 
+      success: true,
+      status: 'alive',
+      pings: pingCount,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Ping endpoint error:', error);
+    res.status(500).json({ 
+      success: false,
+      status: 'error',
+      message: error.message
+    });
+  }
 });
 
 // Health check endpoint with email service status
 app.get('/api/health', (req, res) => {
-  const emailConfigured = missingEnvVars.length === 0;
-  res.status(200).json({ 
-    success: true,
-    status: 'ok', 
-    message: 'Server is running',
-    emailService: emailConfigured ? 'configured' : 'not configured',
-    missingVars: emailConfigured ? [] : missingEnvVars,
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  });
+  try {
+    const emailConfigured = missingEnvVars.length === 0;
+    const uptime = process.uptime();
+    const memoryUsage = process.memoryUsage();
+    
+    // Set headers to prevent caching
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    res.status(200).json({ 
+      success: true,
+      status: 'healthy', 
+      message: 'Server is running',
+      services: {
+        email: emailConfigured ? 'configured' : 'not configured',
+        chatbot: process.env.GEMINI_API_KEY ? 'configured' : 'not configured'
+      },
+      missingVars: emailConfigured ? [] : missingEnvVars,
+      uptime: {
+        seconds: Math.floor(uptime),
+        formatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`
+      },
+      keepAlive: {
+        lastPing: lastPingTime.toISOString(),
+        totalPings: pingCount,
+        serverStarted: serverStartTime.toISOString()
+      },
+      memory: {
+        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+        rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Health check error:', error);
+    res.status(500).json({ 
+      success: false,
+      status: 'unhealthy',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Test email endpoint - sends actual test email to verify functionality

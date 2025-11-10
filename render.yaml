@@ -4,6 +4,7 @@ services:
     env: node
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -15,3 +16,16 @@ services:
         sync: false
       - key: BREVO_FROM_NAME
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+# Cron jobs to keep the backend alive and prevent cold starts
+  - type: cron
+    name: nexoventlabs-keepalive
+    schedule: "*/5 * * * *"  # Every 5 minutes
+    env: node
+    buildCommand: npm install
+    startCommand: node keep-alive.js
+    envVars:
+      - key: BACKEND_URL
+        value: https://nexoventlabs-backend.onrender.com
