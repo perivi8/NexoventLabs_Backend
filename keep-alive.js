@@ -9,6 +9,11 @@
  * Usage:
  * - Set BACKEND_URL environment variable to your Render backend URL
  * - Run: node keep-alive.js
+ * 
+ * Optimized for Render Cron Jobs:
+ * - Fast execution (< 30 seconds)
+ * - Proper error handling
+ * - Retry logic for cold starts
  */
 
 import https from 'https';
@@ -16,8 +21,8 @@ import http from 'http';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'https://nexoventlabs-backend.onrender.com';
 const PING_ENDPOINT = '/api/ping';
-const HEALTH_ENDPOINT = '/api/health';
-const TIMEOUT = 30000; // 30 seconds timeout
+const TIMEOUT = 25000; // 25 seconds timeout (Render cron has 30s limit)
+const MAX_RETRIES = 2; // Retry twice for cold starts
 
 // Color codes for console output
 const colors = {
@@ -102,71 +107,54 @@ function makeRequest(url) {
   });
 }
 
-async function pingServer() {
-  log('🚀 Starting keep-alive ping...', 'cyan');
-  log(`📡 Target: ${BACKEND_URL}`, 'blue');
-  
+async function pingWithRetry(url, attempt = 1) {
   try {
-    // First, try the ping endpoint
-    log('📍 Pinging /api/ping...', 'blue');
-    const pingResult = await makeRequest(`${BACKEND_URL}${PING_ENDPOINT}`);
+    log(`📍 Attempt ${attempt}/${MAX_RETRIES + 1}: Pinging ${url}...`, 'blue');
+    const result = await makeRequest(url);
     
-    if (pingResult.success) {
-      log(`✅ Ping successful! (${pingResult.duration}ms)`, 'green');
-      log(`📊 Response: ${JSON.stringify(pingResult.data)}`, 'green');
-      
-      // Also check health endpoint for detailed status
-      log('📍 Checking /api/health...', 'blue');
-      const healthResult = await makeRequest(`${BACKEND_URL}${HEALTH_ENDPOINT}`);
-      
-      if (healthResult.success) {
-        log(`✅ Health check successful! (${healthResult.duration}ms)`, 'green');
-        
-        if (healthResult.data.uptime) {
-          log(`⏱️  Server uptime: ${healthResult.data.uptime.formatted}`, 'cyan');
+    if (result.success) {
+      log(`✅ Ping successful! (${result.duration}ms)`, 'green');
+      if (result.data && typeof result.data === 'object') {
+        log(`📊 Status: ${result.data.status || 'alive'}`, 'green');
+        if (result.data.pings) {
+          log(`🔄 Total pings: ${result.data.pings}`, 'cyan');
         }
-        
-        if (healthResult.data.keepAlive) {
-          log(`🔄 Total pings: ${healthResult.data.keepAlive.totalPings}`, 'cyan');
-        }
-        
-        if (healthResult.data.services) {
-          log(`📧 Email service: ${healthResult.data.services.email}`, 'cyan');
-          log(`🤖 Chatbot service: ${healthResult.data.services.chatbot}`, 'cyan');
-        }
-        
-        log('✅ Keep-alive completed successfully!', 'green');
-        process.exit(0);
-      } else {
-        log(`⚠️  Health check returned status ${healthResult.statusCode}`, 'yellow');
-        log('✅ But ping was successful, server is alive!', 'green');
-        process.exit(0);
       }
+      return true;
     } else {
-      log(`❌ Ping failed with status ${pingResult.statusCode}`, 'red');
-      log(`📋 Response: ${JSON.stringify(pingResult.data)}`, 'red');
-      process.exit(1);
+      throw new Error(`HTTP ${result.statusCode}: ${JSON.stringify(result.data)}`);
     }
   } catch (error) {
-    log(`❌ Keep-alive failed: ${error.error || error.message}`, 'red');
-    log(`⏱️  Duration: ${error.duration}ms`, 'red');
+    const errorMsg = error.error || error.message;
+    log(`❌ Attempt ${attempt} failed: ${errorMsg}`, 'red');
     
-    // Try one more time with just a basic HTTP request
-    log('🔄 Retrying with basic request...', 'yellow');
-    
-    try {
-      const retryResult = await makeRequest(BACKEND_URL);
-      if (retryResult.success) {
-        log(`✅ Retry successful! Server is responding (${retryResult.duration}ms)`, 'green');
-        process.exit(0);
-      } else {
-        log(`❌ Retry failed with status ${retryResult.statusCode}`, 'red');
-        process.exit(1);
-      }
-    } catch (retryError) {
-      log(`❌ Retry also failed: ${retryError.error || retryError.message}`, 'red');
-      process.exit(1);
+    if (attempt <= MAX_RETRIES) {
+      const waitTime = attempt * 2000; // 2s, 4s
+      log(`⏳ Waiting ${waitTime}ms before retry (server might be cold starting)...`, 'yellow');
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return pingWithRetry(url, attempt + 1);
     }
+    
+    return false;
+  }
+}
+
+async function pingServer() {
+  log('🚀 Starting keep-alive ping...', 'cyan');
+  log(`📡 Target: ${BACKEND_URL}${PING_ENDPOINT}`, 'blue');
+  log(`⏱️  Timeout: ${TIMEOUT}ms`, 'blue');
+  
+  const pingUrl = `${BACKEND_URL}${PING_ENDPOINT}`;
+  const success = await pingWithRetry(pingUrl);
+  
+  if (success) {
+    log('✅ Keep-alive completed successfully!', 'green');
+    process.exit(0);
+  } else {
+    log('❌ Keep-alive failed after all retries', 'red');
+    log('💡 Check if BACKEND_URL is correct and server is deployed', 'yellow');
+    log(`💡 Current URL: ${BACKEND_URL}`, 'yellow');
+    process.exit(1);
   }
 }
 

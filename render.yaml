@@ -19,13 +19,17 @@ services:
       - key: GEMINI_API_KEY
         sync: false
 
-# Cron jobs to keep the backend alive and prevent cold starts
+# Cron job to keep the backend alive and prevent cold starts
+# Runs every 5 minutes to ping the backend server
   - type: cron
     name: nexoventlabs-keepalive
     schedule: "*/5 * * * *"  # Every 5 minutes
     env: node
+    region: oregon  # Same region as web service for faster response
     buildCommand: npm install
     startCommand: node keep-alive.js
     envVars:
       - key: BACKEND_URL
         value: https://nexoventlabs-backend.onrender.com
+      - key: NODE_ENV
+        value: production

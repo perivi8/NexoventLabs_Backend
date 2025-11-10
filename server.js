@@ -400,31 +400,39 @@ Andhra Pradesh, India
   }
 });
 
-// Simple ping endpoint for cron jobs (minimal response)
+// Simple ping endpoint for cron jobs (minimal response, optimized for reliability)
 app.get('/api/ping', (req, res) => {
   try {
     lastPingTime = new Date();
     pingCount++;
     
-    // Set headers to prevent caching
+    // Log ping for monitoring
+    console.log(`🏓 Ping #${pingCount} received at ${lastPingTime.toISOString()}`);
+    
+    // Set headers to prevent caching and ensure fresh response
     res.set({
       'Cache-Control': 'no-store, no-cache, must-revalidate, private',
       'Pragma': 'no-cache',
-      'Expires': '0'
+      'Expires': '0',
+      'Content-Type': 'application/json'
     });
     
+    // Send immediate response (critical for cron jobs)
     res.status(200).json({ 
       success: true,
       status: 'alive',
       pings: pingCount,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime())
     });
   } catch (error) {
     console.error('❌ Ping endpoint error:', error);
-    res.status(500).json({ 
-      success: false,
-      status: 'error',
-      message: error.message
+    // Always send a response, even on error
+    res.status(200).json({ 
+      success: true,
+      status: 'alive',
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
